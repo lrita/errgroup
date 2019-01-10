@@ -131,7 +131,7 @@ func TestZeroGroup(t *testing.T) {
 			if gErr := g.Wait(); gErr != firstErr {
 				t.Errorf("after %T.Go(func() error { return err }) for err in %v\n"+
 					"g.Wait() = %v; want %v",
-					g, tc.errs[:i+1], err, firstErr)
+					&g, tc.errs[:i+1], err, firstErr)
 			}
 		}
 	}

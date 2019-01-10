@@ -1,6 +1,6 @@
 # errgroup
 
-[![GoDoc](https://godoc.org/github.com/lrita/errgroup?status.png)](https://godoc.org/github.com/lrita/errgroup)
+[![Build Status](https://travis-ci.org/lrita/errgroup.svg?branch=master)](https://travis-ci.org/lrita/errgroup) [![GoDoc](https://godoc.org/github.com/lrita/errgroup?status.png)](https://godoc.org/github.com/lrita/errgroup) [![codecov](https://codecov.io/gh/lrita/errgroup/branch/master/graph/badge.svg)](https://codecov.io/gh/lrita/errgroup)
 
 This repo is forked from [golang.org/x/sync/errgroup](https://godoc.org/golang.org/x/sync/errgroup) and add more feature.
 
