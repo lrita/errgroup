@@ -33,11 +33,11 @@ type Group struct {
 	cancel   func()
 	singular bool
 	parallel int
-	going    int
 	flying   int
 	mu       sync.Mutex
 	wg       sync.WaitGroup
 	cond     *sync.Cond
+	fstack   []func() error
 	errors   []error
 }
 
@@ -71,7 +71,7 @@ func (g *Group) Parallel(n int) *Group {
 // returns the first non-nil error (if any) from them.
 func (g *Group) Wait() (err error) {
 	g.mu.Lock()
-	for g.going != 0 {
+	for g.flying != 0 {
 		g.cond.Wait()
 	}
 	if len(g.errors) != 0 {
@@ -88,6 +88,22 @@ func (g *Group) Wait() (err error) {
 	return
 }
 
+func (g *Group) pop() (f func() error) {
+	g.mu.Lock()
+	l := len(g.fstack)
+	if l != 0 {
+		f = g.fstack[0]
+		copy(g.fstack, g.fstack[1:])
+		g.fstack[l-1] = nil
+		g.fstack = g.fstack[:l-1]
+	} else {
+		g.flying--
+		g.cond.Broadcast()
+	}
+	g.mu.Unlock()
+	return
+}
+
 // Go calls the given function in a new goroutine.
 //
 // The first call to return a non-nil error cancels the group; its error will be
@@ -97,27 +113,27 @@ func (g *Group) Go(f func() error) {
 	if g.cond == nil {
 		g.cond = sync.NewCond(&g.mu)
 	}
-	g.going++
+	g.fstack = append(g.fstack, f)
 	for g.parallel > 0 && g.flying >= g.parallel {
-		g.cond.Wait()
+		g.mu.Unlock()
+		return
 	}
 	g.flying++
 	g.mu.Unlock()
 
 	go func() {
-		defer func() {
-			g.mu.Lock()
-			g.flying--
-			g.going--
-			g.cond.Broadcast()
-			g.mu.Unlock()
-		}()
-		if err := f(); err != nil {
-			g.mu.Lock()
-			g.errors = append(g.errors, err)
-			g.mu.Unlock()
-			if g.cancel != nil {
-				g.cancel()
+		for {
+			f := g.pop()
+			if f == nil {
+				return
+			}
+			if err := f(); err != nil {
+				g.mu.Lock()
+				g.errors = append(g.errors, err)
+				g.mu.Unlock()
+				if g.cancel != nil {
+					g.cancel()
+				}
 			}
 		}
 	}()
