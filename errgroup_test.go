@@ -137,6 +137,53 @@ func TestZeroGroup(t *testing.T) {
 	}
 }
 
+func TestNamespace(t *testing.T) {
+	var (
+		eg  errgroup.Group
+		ch0 = make(chan struct{})
+		ch1 = make(chan struct{})
+		ch2 = make(chan struct{})
+		ch3 = make(chan struct{})
+	)
+
+	eg.Go(func() error { return nil }, 0)
+	eg.Go(func() error { return nil }, 0)
+	eg.Go(func() error { <-ch0; return nil }, 1)
+
+	go func() { eg.Wait(0); close(ch1) }()
+	go func() { eg.Wait(); close(ch2) }()
+	go func() { eg.Wait(1); close(ch3) }()
+
+	select {
+	case <-ch1:
+	case <-time.After(10 * time.Millisecond):
+		t.Fatal("eg.Wait(0) timeout")
+	}
+	select {
+	case <-ch2:
+		t.Fatal("eg.Wait() should timeout")
+	case <-time.After(10 * time.Millisecond):
+	}
+	select {
+	case <-ch3:
+		t.Fatal("eg.Wait(1) should timeout")
+	case <-time.After(10 * time.Millisecond):
+	}
+
+	close(ch0)
+
+	select {
+	case <-ch2:
+	case <-time.After(10 * time.Millisecond):
+		t.Fatal("eg.Wait() timeout")
+	}
+	select {
+	case <-ch3:
+	case <-time.After(10 * time.Millisecond):
+		t.Fatal("eg.Wait(1) timeout")
+	}
+}
+
 func TestWithContext(t *testing.T) {
 	errDoom := errors.New("group_test: doomed")
 
@@ -239,4 +286,27 @@ func TestParallel(t *testing.T) {
 			t.Errorf("expect unexpect %v", err)
 		}
 	}
+}
+
+func BenchmarkErrGroupSerial(b *testing.B) {
+	var (
+		f  = func() error { _ = b.N; return nil }
+		eg errgroup.Group
+	)
+	for i := 0; i < b.N; i++ {
+		eg.Go(f)
+		eg.Wait()
+	}
+}
+
+func BenchmarkErrGroupParallel(b *testing.B) {
+	var (
+		f  = func() error { _ = b.N; return nil }
+		eg errgroup.Group
+	)
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			eg.Go(f)
+		}
+	})
 }

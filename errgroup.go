@@ -30,15 +30,21 @@ func (e Error) Error() string {
 //
 // A zero Group is valid and does not cancel on error.
 type Group struct {
-	cancel   func()
-	singular bool
-	parallel int
-	flying   int
-	mu       sync.Mutex
-	wg       sync.WaitGroup
-	cond     *sync.Cond
-	fstack   []func() error
-	errors   []error
+	cancel    func()
+	singular  bool
+	parallel  int
+	flying    int
+	mu        sync.Mutex
+	wg        sync.WaitGroup
+	cond      *sync.Cond
+	fstack    []stackitem
+	namespace map[interface{}]int
+	errors    []error
+}
+
+type stackitem struct {
+	namespace interface{}
+	f         func() error
 }
 
 // WithContext returns a new Group and an associated Context derived from ctx.
@@ -69,9 +75,24 @@ func (g *Group) Parallel(n int) *Group {
 
 // Wait blocks until all function calls from the Go method have returned, then
 // returns the first non-nil error (if any) from them.
-func (g *Group) Wait() (err error) {
+//
+// It support only wait a given namespace's functions. Details see TestNamespace.
+func (g *Group) Wait(namespace ...interface{}) (err error) {
+	var key interface{}
+	if len(namespace) > 0 {
+		key = namespace[0]
+	}
 	g.mu.Lock()
-	for g.flying != 0 {
+	for {
+		if g.flying == 0 {
+			break
+		}
+		if key != nil {
+			// make Wait() can be invoked before Go()
+			if n, _ := g.namespace[key]; n == 0 {
+				break
+			}
+		}
 		g.cond.Wait()
 	}
 	if len(g.errors) != 0 {
@@ -88,13 +109,13 @@ func (g *Group) Wait() (err error) {
 	return
 }
 
-func (g *Group) pop() (f func() error) {
+func (g *Group) pop() (item stackitem) {
 	g.mu.Lock()
 	l := len(g.fstack)
 	if l != 0 {
-		f = g.fstack[0]
+		item = g.fstack[0]
 		copy(g.fstack, g.fstack[1:])
-		g.fstack[l-1] = nil
+		g.fstack[l-1] = stackitem{}
 		g.fstack = g.fstack[:l-1]
 	} else {
 		g.flying--
@@ -105,16 +126,28 @@ func (g *Group) pop() (f func() error) {
 }
 
 // Go calls the given function in a new goroutine.
+// The count of goroutine is limited by Parallel().
+//
+// It support separated callback functions by given a namespace key and help
+// us only Wait() a given namespace's callback functions.
+//
+// Due to keep compatible with previous api, first given namespace is valid.
 //
 // The first call to return a non-nil error cancels the group; its error will be
 // returned by Wait.
-func (g *Group) Go(f func() error) {
+func (g *Group) Go(f func() error, namespace ...interface{}) {
 	g.mu.Lock()
 	if g.cond == nil {
 		g.cond = sync.NewCond(&g.mu)
+		g.namespace = make(map[interface{}]int)
 	}
-	g.fstack = append(g.fstack, f)
-	for g.parallel > 0 && g.flying >= g.parallel {
+	var key interface{}
+	if len(namespace) > 0 {
+		key = namespace[0]
+		g.namespace[key]++
+	}
+	g.fstack = append(g.fstack, stackitem{namespace: key, f: f})
+	if g.parallel > 0 && g.flying >= g.parallel {
 		g.mu.Unlock()
 		return
 	}
@@ -123,17 +156,29 @@ func (g *Group) Go(f func() error) {
 
 	go func() {
 		for {
-			f := g.pop()
-			if f == nil {
+			item := g.pop()
+			if item.f == nil {
 				return
 			}
-			if err := f(); err != nil {
+			if err := item.f(); err != nil {
 				g.mu.Lock()
 				g.errors = append(g.errors, err)
 				g.mu.Unlock()
 				if g.cancel != nil {
 					g.cancel()
 				}
+			}
+			if item.namespace != nil {
+				g.mu.Lock()
+				n := g.namespace[item.namespace]
+				n--
+				if n <= 0 {
+					delete(g.namespace, item.namespace)
+					g.cond.Broadcast()
+				} else {
+					g.namespace[item.namespace] = n
+				}
+				g.mu.Unlock()
 			}
 		}
 	}()
