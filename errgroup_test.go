@@ -310,3 +310,15 @@ func BenchmarkErrGroupParallel(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkErrGroupParallelWithNamespace(b *testing.B) {
+	var (
+		f  = func() error { _ = b.N; return nil }
+		eg errgroup.Group
+	)
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			eg.Go(f, pb)
+		}
+	})
+}
