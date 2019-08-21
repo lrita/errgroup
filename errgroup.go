@@ -37,7 +37,7 @@ type Group struct {
 	mu        sync.Mutex
 	wg        sync.WaitGroup
 	cond      *sync.Cond
-	fstack    []stackitem
+	fstack    [][]stackitem
 	namespace map[interface{}]int
 	errors    []error
 }
@@ -109,20 +109,64 @@ func (g *Group) Wait(namespace ...interface{}) (err error) {
 	return
 }
 
+const stacklimited = 512
+
+func (g *Group) push(item stackitem) {
+	l := len(g.fstack)
+	if l == 0 || len(g.fstack[l-1]) == stacklimited {
+		g.fstack = append(g.fstack, make([]stackitem, 0, stacklimited))
+	} else {
+		l--
+	}
+	g.fstack[l] = append(g.fstack[l], item)
+}
+
 func (g *Group) pop() (item stackitem) {
 	g.mu.Lock()
-	l := len(g.fstack)
-	if l != 0 {
-		item = g.fstack[0]
+	fstack := g.fstack[0]
+	l := len(fstack)
+	ll := len(g.fstack)
+	if l == 0 && ll > 1 {
 		copy(g.fstack, g.fstack[1:])
-		g.fstack[l-1] = stackitem{}
-		g.fstack = g.fstack[:l-1]
+		g.fstack[ll-1] = nil
+		g.fstack = g.fstack[:ll-1]
+		fstack = g.fstack[0]
+		l = len(fstack)
+	}
+	if l != 0 {
+		item = fstack[0]
+		copy(fstack, fstack[1:])
+		fstack[l-1] = stackitem{}
+		g.fstack[0] = fstack[:l-1]
 	} else {
 		g.flying--
 		g.cond.Broadcast()
 	}
 	g.mu.Unlock()
 	return
+}
+
+// Len return length of pending functions.
+func (g *Group) Len() int {
+	n := 0
+	g.mu.Lock()
+	l := len(g.fstack)
+	if l > 1 {
+		n += (l-2)*stacklimited + len(g.fstack[l-1])
+	}
+	if l > 0 {
+		n += len(g.fstack[0])
+	}
+	g.mu.Unlock()
+	return n
+}
+
+// NamespaceCount returns the count of pending namespaces.
+func (g *Group) NamespaceCount() int {
+	g.mu.Lock()
+	n := len(g.namespace)
+	g.mu.Unlock()
+	return n
 }
 
 // Go calls the given function in a new goroutine.
@@ -136,17 +180,17 @@ func (g *Group) pop() (item stackitem) {
 // The first call to return a non-nil error cancels the group; its error will be
 // returned by Wait.
 func (g *Group) Go(f func() error, namespace ...interface{}) {
+	var key interface{}
 	g.mu.Lock()
 	if g.cond == nil {
 		g.cond = sync.NewCond(&g.mu)
 		g.namespace = make(map[interface{}]int)
 	}
-	var key interface{}
 	if len(namespace) > 0 {
 		key = namespace[0]
 		g.namespace[key]++
 	}
-	g.fstack = append(g.fstack, stackitem{namespace: key, f: f})
+	g.push(stackitem{namespace: key, f: f})
 	if g.parallel > 0 && g.flying >= g.parallel {
 		g.mu.Unlock()
 		return

@@ -288,6 +288,25 @@ func TestParallel(t *testing.T) {
 	}
 }
 
+func TestNoLeakage(t *testing.T) {
+	f := func() error { time.Sleep(time.Minute); return nil }
+	for j, v := range []int{1 << 10, 1 << 15, 1 << 20} {
+		var eg errgroup.Group
+		eg.Parallel(1)
+		for i := 0; i < v; i++ {
+			eg.Go(f, i)
+		}
+		time.Sleep(time.Second)
+		if eg.Len() != v-1 {
+			t.Errorf("%d eg.Len() got %d, expect %d", j, eg.Len(), v-1)
+		}
+		if eg.NamespaceCount() != v {
+			t.Errorf("%d eg.NamespaceCount() got %d, expect %d",
+				j, eg.NamespaceCount(), v-1)
+		}
+	}
+}
+
 func BenchmarkErrGroupSerial(b *testing.B) {
 	var (
 		f  = func() error { _ = b.N; return nil }
@@ -321,4 +340,15 @@ func BenchmarkErrGroupParallelWithNamespace(b *testing.B) {
 			eg.Go(f, pb)
 		}
 	})
+}
+
+func BenchmarkGoWithManyPending(b *testing.B) {
+	var (
+		f  = func() error { time.Sleep(time.Minute); return nil }
+		eg errgroup.Group
+	)
+	eg.Parallel(1)
+	for i := 0; i < b.N; i++ {
+		eg.Go(f, b)
+	}
 }
