@@ -14,12 +14,14 @@ import (
 
 // Error is an error type to track multiple errors. This is used to
 // accumulate errors in cases and return them as a single "error".
-type Error []error
+type Error struct {
+	Errors []error
+}
 
 // Error implements the interface error.
-func (e Error) Error() string {
-	msg := make([]string, 0, len(e))
-	for _, x := range e {
+func (e *Error) Error() string {
+	msg := make([]string, 0, len(e.Errors))
+	for _, x := range e.Errors {
 		msg = append(msg, x.Error())
 	}
 	return strings.Join(msg, ";")
@@ -35,7 +37,6 @@ type Group struct {
 	parallel  int
 	flying    int
 	mu        sync.Mutex
-	wg        sync.WaitGroup
 	cond      *sync.Cond
 	fstack    [][]stackitem
 	namespace map[interface{}]int
@@ -89,6 +90,7 @@ func (g *Group) Wait(namespace ...interface{}) (err error) {
 		}
 		if key != nil {
 			// make Wait() can be invoked before Go()
+			//lint:ignore S1005 namespace maybe a nil
 			if n, _ := g.namespace[key]; n == 0 {
 				break
 			}
@@ -99,7 +101,7 @@ func (g *Group) Wait(namespace ...interface{}) (err error) {
 		if g.singular {
 			err = g.errors[0]
 		} else {
-			err = Error(g.errors)
+			err = &Error{g.errors}
 		}
 	}
 	g.mu.Unlock()
