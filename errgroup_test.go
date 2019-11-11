@@ -309,7 +309,7 @@ func TestNoLeakage(t *testing.T) {
 
 // panic: runtime error: comparing uncomparable type errgroup.Error
 func TestComparableError(t *testing.T) {
-	err := error(&errgroup.Error{[]error{fmt.Errorf("xxx:%v", 1)}})
+	err := error(&errgroup.Error{Errors: []error{fmt.Errorf("xxx:%v", 1)}})
 	//lint:ignore SA4000 must check this
 	if err != err {
 		t.Fatal("should equal")
