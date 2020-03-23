@@ -307,6 +307,27 @@ func TestNoLeakage(t *testing.T) {
 	}
 }
 
+func TestGoWithPanic(t *testing.T) {
+	var (
+		eg errgroup.Group
+		ch = make(chan error)
+	)
+	eg.Parallel(1)
+	eg.Go(func() error { panic("1"); return nil })
+	eg.Go(func() error { panic("2"); return nil })
+	go func() {
+		ch <- eg.Wait()
+	}()
+	select {
+	case <-time.After(3 * time.Second):
+		t.Fatal("Wait() timeout")
+	case err := <-ch:
+		if err == nil {
+			t.Fatal("Wait() got(nil), expect some errors")
+		}
+	}
+}
+
 // panic: runtime error: comparing uncomparable type errgroup.Error
 func TestComparableError(t *testing.T) {
 	err := error(&errgroup.Error{Errors: []error{fmt.Errorf("xxx:%v", 1)}})

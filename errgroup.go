@@ -8,6 +8,8 @@ package errgroup
 
 import (
 	"context"
+	"fmt"
+	"runtime/debug"
 	"strings"
 	"sync"
 )
@@ -148,6 +150,55 @@ func (g *Group) pop() (item stackitem) {
 	return
 }
 
+func (g *Group) onfail(err error) {
+	g.mu.Lock()
+	g.errors = append(g.errors, err)
+	g.mu.Unlock()
+	if g.cancel != nil {
+		g.cancel()
+	}
+}
+
+func (g *Group) delnamespace(namespace interface{}) {
+	g.mu.Lock()
+	n := g.namespace[namespace]
+	n--
+	if n <= 0 {
+		delete(g.namespace, namespace)
+		g.cond.Broadcast()
+	} else {
+		g.namespace[namespace] = n
+	}
+	g.mu.Unlock()
+}
+
+func (g *Group) loop() {
+	var item stackitem
+
+	defer func() {
+		if x := recover(); x != nil {
+			g.onfail(fmt.Errorf("panic: %v at\n%s", x, string(debug.Stack())))
+			if item.namespace != nil {
+				g.delnamespace(item.namespace)
+			}
+			go g.loop()
+		}
+	}()
+
+	for {
+		item = g.pop()
+		if item.f == nil {
+			return
+		}
+		if err := item.f(); err != nil {
+			g.onfail(err)
+		}
+		if item.namespace != nil {
+			g.delnamespace(item.namespace)
+		}
+	}
+}
+
 // Len return length of pending functions.
 func (g *Group) Len() int {
 	n := 0
@@ -200,32 +251,5 @@ func (g *Group) Go(f func() error, namespace ...interface{}) {
 	g.flying++
 	g.mu.Unlock()
 
-	go func() {
-		for {
-			item := g.pop()
-			if item.f == nil {
-				return
-			}
-			if err := item.f(); err != nil {
-				g.mu.Lock()
-				g.errors = append(g.errors, err)
-				g.mu.Unlock()
-				if g.cancel != nil {
-					g.cancel()
-				}
-			}
-			if item.namespace != nil {
-				g.mu.Lock()
-				n := g.namespace[item.namespace]
-				n--
-				if n <= 0 {
-					delete(g.namespace, item.namespace)
-					g.cond.Broadcast()
-				} else {
-					g.namespace[item.namespace] = n
-				}
-				g.mu.Unlock()
-			}
-		}
-	}()
+	go g.loop()
 }
