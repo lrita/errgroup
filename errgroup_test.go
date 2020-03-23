@@ -313,8 +313,8 @@ func TestGoWithPanic(t *testing.T) {
 		ch = make(chan error)
 	)
 	eg.Parallel(1)
-	eg.Go(func() error { panic("1"); return nil })
-	eg.Go(func() error { panic("2"); return nil })
+	eg.Go(func() error { panic("1") })
+	eg.Go(func() error { panic("2") })
 	go func() {
 		ch <- eg.Wait()
 	}()
