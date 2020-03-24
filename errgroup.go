@@ -181,6 +181,8 @@ func (g *Group) loop() {
 			if item.namespace != nil {
 				g.delnamespace(item.namespace)
 			}
+		}
+		if item.f != nil {
 			go g.loop()
 		}
 	}()

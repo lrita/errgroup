@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -307,12 +308,13 @@ func TestNoLeakage(t *testing.T) {
 	}
 }
 
-func TestGoWithPanic(t *testing.T) {
+func TestGoWithPanicOrGoexit(t *testing.T) {
 	var (
 		eg errgroup.Group
 		ch = make(chan error)
 	)
 	eg.Parallel(1)
+	eg.Go(func() error { runtime.Goexit(); return nil })
 	eg.Go(func() error { panic("1") })
 	eg.Go(func() error { panic("2") })
 	go func() {
